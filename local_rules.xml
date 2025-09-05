@@ -1,0 +1,207 @@
+<!-- Local rules -->
+
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+
+<!-- Example -->
+<group name="local,syslog,sshd,">
+
+  <!--
+  Dec 10 01:02:02 host sshd[1234]: Failed none for root from 1.1.1.1 port 1066 ssh2
+  -->
+  <rule id="100001" level="5">
+    <if_sid>5716</if_sid>
+    <srcip>1.1.1.1</srcip>
+    <description>sshd: authentication failed from IP 1.1.1.1.</description>
+    <group>authentication_failed,pci_dss_10.2.4,pci_dss_10.2.5,</group>
+  </rule>
+
+</group>
+
+<group name="sysmon,">
+
+  <!-- =========================================================
+       Sysmon Event ID 1: ProcessCreate
+       Strategy: alert on unusual paths; suppress common noisy OS apps
+       ========================================================= -->
+  <rule id="100100" level="7">
+    <if_group>sysmon_event1</if_group>
+    <description>Sysmon - Event 1: Process created from user/profile or temp path: $(sysmon.image)</description>
+    <options>no_full_log</options>
+    <field name="sysmon.image">(?i)^C:\\Users\\||^C:\\Windows\\Temp\\||^C:\\ProgramData\\||^\\Device\\HarddiskVolumeShadowCopy</field>
+    <group>process_creation,anomaly_path,sysmon_event1,</group>
+  </rule>
+
+  <!-- Known-good noisy process/commandline suppressions (mirror SoS excludes) -->
+  <rule id="100101" level="0">
+    <if_sid>100100</if_sid>
+    <description>Quiet: Windows error reporting / telemetry</description>
+    <regex>\\wermgr\.exe||CompatTelRunner\.exe||SearchIndexer\.exe</regex>
+  </rule>
+
+  <rule id="100102" level="0">
+    <if_sid>100100</if_sid>
+    <description>Quiet: .NET ngen/mscorsvw churn</description>
+    <regex>\\ngen\.exe||\\ngentask\.exe||\\mscorsvw\.exe</regex>
+  </rule>
+
+  <rule id="100103" level="0">
+    <if_sid>100100</if_sid>
+    <description>Quiet: Office Click-to-Run / licensing helpers</description>
+    <regex>OfficeC2RClient\.exe||OfficeClickToRun\.exe||OSPPSVC\.EXE</regex>
+  </rule>
+
+  <rule id="100104" level="0">
+    <if_sid>100100</if_sid>
+    <description>Quiet: Chrome/Edge multi-process noise</description>
+    <regex>\\chrome\.exe.+--type=||\\msedge\.exe.+--type=</regex>
+  </rule>
+
+  <!-- =========================================================
+       Sysmon Event ID 2: FileCreateTime (timestomp/VSS copy)
+       ========================================================= -->
+  <rule id="100120" level="10">
+    <if_group>sysmon_event2</if_group>
+    <description>Sysmon - Event 2: File creation time changed on EXE (possible timestomp): $(sysmon.targetFilename)</description>
+    <field name="sysmon.targetFilename">(?i)\.exe$</field>
+    <group>timestomp,file_tamper,sysmon_event2,</group>
+  </rule>
+
+  <rule id="100121" level="10">
+    <if_group>sysmon_event2</if_group>
+    <description>Sysmon - Event 2: Timestomp activity under user profile: $(sysmon.image)</description>
+    <field name="sysmon.image">(?i)^C:\\Users\\</field>
+    <group>timestomp,user_zone,sysmon_event2,</group>
+  </rule>
+
+  <rule id="100122" level="10">
+    <if_group>sysmon_event2</if_group>
+    <description>Sysmon - Event 2: Access against Volume Shadow Copy device: $(sysmon.image)</description>
+    <field name="sysmon.image">(?i)^\\Device\\HarddiskVolumeShadowCopy</field>
+    <group>vss_abuse,timestomp,sysmon_event2,</group>
+  </rule>
+
+  <!-- Quiet: Known updaters/installers touching file times -->
+  <rule id="100123" level="0">
+    <if_group>sysmon_event2</if_group>
+    <description>Quiet: installers/updaters</description>
+    <regex>(?i)msiexec\.exe||TrustedInstaller\.exe||\\Update\\||setup||install||redist\.exe$</regex>
+  </rule>
+
+  <!-- =========================================================
+       Sysmon Event ID 3: NetworkConnect
+       Strategy: LO(L)BAS & admin tools making outbound + sensitive ports
+       ========================================================= -->
+  <rule id="100140" level="10">
+    <if_group>sysmon_event3</if_group>
+    <description>Sysmon - Event 3: Suspicious LOLBIN initiating network connection: $(sysmon.image)</description>
+    <field name="sysmon.image">(?i)\\certutil\.exe$||\\cmd\.exe$||\\cmstp\.exe$||\\cscript\.exe$||\\mshta\.exe$||\\msbuild\.exe$||\\regsvr32\.exe$||\\rundll32\.exe$||\\powershell\.exe$||\\powershell_ise\.exe$||\\wscript\.exe$||\\wmic\.exe$||\\bitsadmin\.exe$||\\expand\.exe$||\\extrac32\.exe$||\\findstr\.exe$||\\ieexec\.exe$||\\makecab\.exe$||\\replace\.exe$||\\java\.exe$||\\javaw\.exe$||\\javaws\.exe$||\\notepad\.exe$||\\schtasks\.exe$||\\sc\.exe$||\\tasklist\.exe$||\\taskkill\.exe$||\\net\.exe$||\\net1\.exe$||\\nbtstat\.exe$</field>
+    <group>netconn,lolbas,sysmon_event3,</group>
+  </rule>
+
+  <rule id="100141" level="10">
+    <if_group>sysmon_event3</if_group>
+    <description>Sysmon - Event 3: Hacker tools initiating network connection: $(sysmon.image)</description>
+    <field name="sysmon.image">(?i)\\ncat\.exe$||\\nc\.exe$||\\psexec\.exe$||\\psexesvc\.exe$||\\vncviewer\.exe$||\\vncservice\.exe$||\\nmap\.exe$||\\tor\.exe$||\\winexesvc\.exe$</field>
+    <group>netconn,hacking_tools,sysmon_event3,</group>
+  </rule>
+
+  <rule id="100142" level="8">
+    <if_group>sysmon_event3</if_group>
+    <description>Sysmon - Event 3: Connection to sensitive admin or C2-ish ports: $(sysmon.destinationPort)</description>
+    <field name="sysmon.destinationPort">^22$||^23$||^25$||^143$||^3389$||^5800$||^5900$||^4444$||^1080$||^3128$||^8080$||^1723$||^9001$||^9030$</field>
+    <group>netconn,sensitive_ports,sysmon_event3,</group>
+  </rule>
+
+  <!-- Quiet: Microsoft/Defender/Teams, OCSP, loopback -->
+  <rule id="100143" level="0">
+    <if_group>sysmon_event3</if_group>
+    <description>Quiet: Defender platform / Teams updater</description>
+    <regex>(?i)^C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\||AppData\\Local\\Microsoft\\Teams\\current\\Teams\.exe$</regex>
+  </rule>
+
+  <rule id="100144" level="0">
+    <if_group>sysmon_event3</if_group>
+    <description>Quiet: Microsoft delivery/OCSP/loopback</description>
+    <regex>(?i)\.microsoft\.com$||microsoft\.com\.akadns\.net$||microsoft\.com\.nsatc\.net$||^127\.0\.0\.1$||^fe80:0:0:0</regex>
+    <field name="sysmon.destinationHostname">(?i)\.microsoft\.com$||microsoft\.com\.akadns\.net$||microsoft\.com\.nsatc\.net$</field>
+    <field name="sysmon.destinationIp">^23\.4\.43\.27$||^72\.21\.91\.29$||^127\.0\.0\.1$</field>
+  </rule>
+
+  <!-- =========================================================
+       Sysmon Event ID 5: ProcessTerminate (unusual path)
+       ========================================================= -->
+  <rule id="100160" level="4">
+    <if_group>sysmon_event5</if_group>
+    <description>Sysmon - Event 5: Process terminated from suspicious path: $(sysmon.image)</description>
+    <field name="sysmon.image">(?i)^\\||^C:\\Users\\</field>
+    <group>process_termination,anomaly_path,sysmon_event5,</group>
+  </rule>
+
+  <!-- =========================================================
+       Sysmon Event ID 6: DriverLoad (non-Microsoft)
+       ========================================================= -->
+  <rule id="100170" level="10">
+    <if_group>sysmon_event6</if_group>
+    <description>Sysmon - Event 6: Unsigned or non-Microsoft driver loaded: $(sysmon.signature)</description>
+    <field name="sysmon.signature">(?i)microsoft|windows|intel.*</field>
+    <group>driver_load,privilege_escalation,sysmon_event6</group>
+  </rule>
+
+  <!-- =========================================================
+       Sysmon Event ID 11: FileCreate
+       Strategy: alert on dangerous extensions/locations
+       ========================================================= -->
+  <rule id="100180" level="8">
+    <if_group>sysmon_event11</if_group>
+    <description>Sysmon - Event 11: Dangerous script/executable written: $(sysmon.targetFilename)</description>
+    <field name="sysmon.targetFilename">(?i)\.exe$||\.dll$||\.sys$||\.ocx$||\.ps1$||\.vbs$||\.vbe$||\.js$||\.jse$||\.hta$||\.sct$||\.wsf$||\.cmd$||\.bat$||\.scr$||\.chm$||\.jar$||\.jnlp$||\.docm$||\.xlsm$||\.pptm$||\.rtf$||\.crx$</field>
+    <group>file_create,malware_stage,sysmon_event11,</group>
+  </rule>
+
+  <rule id="100181" level="6">
+    <if_group>sysmon_event11</if_group>
+    <description>Sysmon - Event 11: File dropped in autorun/startup or system drivers: $(sysmon.targetFilename)</description>
+    <field name="sysmon.targetFilename">(?i)\\Start Menu\\||\\Startup\\||^C:\\Windows\\SysWOW64\\Drivers\\||^C:\\Windows\\system32\\Drivers\\</field>
+    <group>persistence,file_create,sysmon_event11,</group>
+  </rule>
+
+  <rule id="100182" level="6">
+    <if_group>sysmon_event11</if_group>
+    <description>Sysmon - Event 11: Files under Group Policy or PowerShell directories: $(sysmon.targetFilename)</description>
+    <field name="sysmon.targetFilename">(?i)C:\\Windows\\system32\\GroupPolicy||C:\\Windows\\system32\\WindowsPowerShell||C:\\Windows\\SysWOW64\\Wbem||C:\\Windows\\SysWOW64\\WindowsPowerShell</field>
+    <group>persistence,gpo_abuse,sysmon_event11,</group>
+  </rule>
+
+  <rule id="100183" level="6">
+    <if_group>sysmon_event11</if_group>
+    <description>Sysmon - Event 11: Outlook attachments / Downloads (potential initial access): $(sysmon.targetFilename)</description>
+    <field name="sysmon.targetFilename">(?i)\\Content\.Outlook\\||\\Downloads\\</field>
+    <group>initial_access,file_create,sysmon_event11,</group>
+  </rule>
+
+  <!-- Quiet: setup/installer/Windows update churn -->
+  <rule id="100184" level="0">
+    <if_group>sysmon_event11</if_group>
+    <description>Quiet: MSI/Click2Run/Windows update caches</description>
+    <regex>(?i)\\Windows\\Installer\\||\\$WINDOWS\.~BT\\Sources\\||OfficeC2RClient\.exe||CompatTelRunner\.exe||\\winsxs\\amd64_microsoft-windows</regex>
+  </rule>
+
+  <!-- =========================================================
+       Registry events (12/13/14) – autoruns/logon scripts
+       ========================================================= -->
+  <rule id="100190" level="10">
+    <if_group>sysmon_event12,sysmon_event13,sysmon_event14</if_group>
+    <description>Sysmon - Registry: Registry autorun/logon persistence key touched: $(sysmon.targetObject)</description>
+    <field name="sysmon.targetObject">(?i)CurrentVersion\\Run||CurrentVersion\\RunOnce||CurrentVersion\\RunServices||CurrentVersion\\RunServicesOnce||Policies\\Explorer\\Run||Winlogon\\Shell||Winlogon\\System</field>
+    <group>registry,persistence,sysmon_registry,</group>
+  </rule>
+
+  <rule id="100191" level="8">
+    <if_group>sysmon_event12,sysmon_event13,sysmon_event14</if_group>
+    <description>Sysmon - Registry: GPO/User scripts persistence keys changed: $(sysmon.targetObject)</description>
+    <field name="sysmon.targetObject">(?i)Group Policy\\Scripts||Group Policy\\Windows\\System\\Scripts</field>
+    <group>registry,persistence,gpo,sysmon_registry,</group>
+  </rule>
+
+</group>
